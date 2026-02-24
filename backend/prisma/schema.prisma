@@ -1,0 +1,172 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// Auth & User
+// ─────────────────────────────────────────────
+
+enum Role {
+  STUDENT
+  INSTRUCTOR
+  ADMIN
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      Role     @default(STUDENT)
+  approved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Maverick
+  coursesCreated Course[]      @relation("CourseCreator")
+  quizAttempts   QuizAttempt[]
+
+  // Skynet
+  availabilities     Availability[] @relation("InstructorAvailability")
+  bookingsAsStudent  Booking[]      @relation("StudentBookings")
+  bookingsAsInstructor Booking[]    @relation("InstructorBookings")
+}
+
+// ─────────────────────────────────────────────
+// Maverick Module – Learning Hierarchy
+// ─────────────────────────────────────────────
+
+model Course {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  createdById String
+  createdBy   User     @relation("CourseCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  modules     Module[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([title])
+}
+
+model Module {
+  id        String   @id @default(uuid())
+  title     String
+  order     Int      @default(0)
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons   Lesson[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courseId])
+}
+
+enum LessonType {
+  TEXT
+  MCQ_QUIZ
+}
+
+model Lesson {
+  id        String     @id @default(uuid())
+  title     String
+  type      LessonType
+  order     Int        @default(0)
+  content   String?    // For TEXT lessons (rich text / markdown)
+  moduleId  String
+  module    Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  questions Question[]
+  attempts  QuizAttempt[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([moduleId])
+}
+
+model Question {
+  id            String   @id @default(uuid())
+  text          String
+  options       Json     // String[] stored as JSON array
+  correctIndex  Int      // 0-based index into options array
+  explanation   String?
+  order         Int      @default(0)
+  lessonId      String
+  lesson        Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  answers       AttemptAnswer[]
+
+  @@index([lessonId])
+}
+
+model QuizAttempt {
+  id         String          @id @default(uuid())
+  userId     String
+  lessonId   String
+  score      Float           // percentage 0-100
+  totalQ     Int
+  correct    Int
+  passed     Boolean
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson     Lesson          @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  answers    AttemptAnswer[]
+  createdAt  DateTime        @default(now())
+
+  @@index([userId, lessonId])
+}
+
+model AttemptAnswer {
+  id           String      @id @default(uuid())
+  attemptId    String
+  questionId   String
+  selectedIndex Int
+  isCorrect    Boolean
+  attempt      QuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question     Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────
+// Skynet Module – Scheduling
+// ─────────────────────────────────────────────
+
+model Availability {
+  id           String    @id @default(uuid())
+  instructorId String
+  instructor   User      @relation("InstructorAvailability", fields: [instructorId], references: [id], onDelete: Cascade)
+  startTime    DateTime
+  endTime      DateTime
+  bookings     Booking[]
+  createdAt    DateTime  @default(now())
+
+  @@index([instructorId, startTime])
+}
+
+enum BookingStatus {
+  REQUESTED
+  APPROVED
+  COMPLETED
+  CANCELLED
+}
+
+model Booking {
+  id             String        @id @default(uuid())
+  studentId      String
+  instructorId   String
+  availabilityId String?
+  startTime      DateTime
+  endTime        DateTime
+  status         BookingStatus @default(REQUESTED)
+  notes          String?
+  student        User          @relation("StudentBookings", fields: [studentId], references: [id], onDelete: Cascade)
+  instructor     User          @relation("InstructorBookings", fields: [instructorId], references: [id], onDelete: Cascade)
+  availability   Availability? @relation(fields: [availabilityId], references: [id])
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([instructorId, startTime, endTime])
+  @@index([studentId])
+}
