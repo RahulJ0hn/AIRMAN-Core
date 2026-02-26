@@ -34,11 +34,8 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
     ports:
       - "4000:4000"
-    volumes:
-      - ./backend:/app
-      - /app/node_modules
     command: >
-      sh -c "npx prisma db push --accept-data-loss && npx prisma db seed && node dist/index.js"
+      sh -c "npx prisma db push --accept-data-loss && node dist/index.js"
 
   frontend:
     build:
