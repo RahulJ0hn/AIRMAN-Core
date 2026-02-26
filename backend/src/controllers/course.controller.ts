@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { body, param } from "express-validator";
+import { body } from "express-validator";
 import * as courseService from "../services/course.service";
 import { sendSuccess, sendError } from "../utils/response";
 import { AuthRequest } from "../types";

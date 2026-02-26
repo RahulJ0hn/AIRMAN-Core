@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { body, query } from "express-validator";
+import { body } from "express-validator";
 import * as schedulingService from "../services/scheduling.service";
 import { sendSuccess, sendError } from "../utils/response";
 import { AuthRequest } from "../types";

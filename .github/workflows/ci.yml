@@ -50,10 +50,10 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
-      - name: Run migrations (test DB)
+      - name: Push schema to test DB
         env:
           DATABASE_URL: postgresql://airman:airman_secret@localhost:5432/airman_test
-        run: npx prisma migrate deploy
+        run: npx prisma db push --accept-data-loss
 
       - name: Lint
         run: npm run lint

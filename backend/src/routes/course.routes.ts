@@ -2,7 +2,6 @@ import { Router } from "express";
 import { authenticate, authorize } from "../middleware/auth.middleware";
 import { validate } from "../middleware/validate.middleware";
 import * as courseCtrl from "../controllers/course.controller";
-import * as quizCtrl from "../controllers/quiz.controller";
 
 const router = Router();
 
