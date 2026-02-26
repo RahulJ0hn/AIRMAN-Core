@@ -348,7 +348,11 @@ export function SchedulingPage() {
                         <div key={b.id}
                              className={`rounded-md p-1.5 border ${STATUS_CONFIG[b.status].style}`}>
                           <div className="font-semibold truncate text-[10px]">
-                            {isInstructor ? b.student.name : b.instructor.name}
+                            {isInstructor
+                              ? b.student.name
+                              : isStudent
+                              ? b.instructor.name
+                              : `${b.student.name} · ${b.instructor.name}`}
                           </div>
                           <div className="font-mono text-[10px]">
                             {format(new Date(b.startTime), "HH:mm")}–{format(new Date(b.endTime), "HH:mm")}
@@ -366,7 +370,7 @@ export function SchedulingPage() {
         {/* ── Bookings List ── */}
         <div className="animate-fade-up-2">
           <h2 className="font-display text-2xl font-semibold mb-5">
-            {isInstructor ? "Incoming Requests" : "My Bookings"}
+            {isInstructor ? "Incoming Requests" : isStudent ? "My Bookings" : "All Bookings"}
           </h2>
 
           {bookingsLoading ? (
@@ -389,7 +393,11 @@ export function SchedulingPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2.5 mb-1">
                         <p className="font-semibold truncate">
-                          {isStudent ? booking.instructor.name : booking.student.name}
+                          {isStudent
+                            ? booking.instructor.name
+                            : isInstructor
+                            ? booking.student.name
+                            : `${booking.student.name} → ${booking.instructor.name}`}
                         </p>
                         <span className={`shrink-0 border rounded px-2 py-0.5 text-[10px] font-bold
                                           tracking-wider uppercase ${STATUS_CONFIG[booking.status].style}`}>
