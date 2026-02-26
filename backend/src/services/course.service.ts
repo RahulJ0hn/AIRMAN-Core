@@ -101,12 +101,21 @@ export async function listLessons(moduleId: string) {
 }
 
 export async function getLessonById(id: string) {
-  return prisma.lesson.findUnique({
+  const lesson = await prisma.lesson.findUnique({
     where: { id },
     include: {
       questions: { orderBy: { order: "asc" } },
     },
   });
+  if (!lesson) return null;
+  // Backward-compat: options may have been double-JSON-encoded as a string
+  return {
+    ...lesson,
+    questions: lesson.questions.map((q) => ({
+      ...q,
+      options: typeof q.options === "string" ? JSON.parse(q.options) : q.options,
+    })),
+  };
 }
 
 export async function createLesson(data: {
@@ -132,7 +141,7 @@ export async function createLesson(data: {
         ? {
             create: questions.map((q) => ({
               ...q,
-              options: JSON.stringify(q.options),
+              options: q.options,
             })),
           }
         : undefined,

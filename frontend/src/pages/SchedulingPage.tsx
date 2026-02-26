@@ -1,57 +1,57 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Calendar, Clock, Plus, ChevronLeft, ChevronRight, CheckCircle, XCircle, Loader2 } from "lucide-react";
+import { Calendar, Clock, Plus, ChevronLeft, ChevronRight, CheckCircle, XCircle, Loader2, X } from "lucide-react";
 import { format, startOfWeek, addDays, addWeeks, subWeeks, isSameDay } from "date-fns";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { schedulingService } from "@/services/scheduling.service";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/useToast";
 import type { Booking, BookingStatus, Availability } from "@/types";
 
-const STATUS_CONFIG: Record<BookingStatus, { label: string; color: string }> = {
-  REQUESTED: { label: "Requested", color: "bg-yellow-100 text-yellow-800 border-yellow-300" },
-  APPROVED: { label: "Approved", color: "bg-green-100 text-green-800 border-green-300" },
-  COMPLETED: { label: "Completed", color: "bg-blue-100 text-blue-800 border-blue-300" },
-  CANCELLED: { label: "Cancelled", color: "bg-gray-100 text-gray-500 border-gray-300" },
+const STATUS_CONFIG: Record<BookingStatus, { label: string; style: string }> = {
+  REQUESTED: { label: "Requested", style: "bg-amber-500/15 text-amber-400 border-amber-500/30"   },
+  APPROVED:  { label: "Approved",  style: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
+  COMPLETED: { label: "Completed", style: "bg-sky-500/15 text-sky-400 border-sky-500/30"          },
+  CANCELLED: { label: "Cancelled", style: "bg-muted text-muted-foreground border-border"           },
 };
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+const inputCls = `w-full h-10 rounded-lg bg-input border border-border px-3 text-sm
+  text-foreground placeholder:text-muted-foreground/50
+  focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary
+  transition-all duration-150`;
+
+const labelCls = "block text-xs font-semibold tracking-wider uppercase text-muted-foreground mb-1.5";
+
 export function SchedulingPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [weekStart, setWeekStart]     = useState(() => startOfWeek(new Date()));
   const [showAvailForm, setShowAvailForm] = useState(false);
-  const [showBookForm, setShowBookForm] = useState(false);
+  const [showBookForm,  setShowBookForm]  = useState(false);
   const [availForm, setAvailForm] = useState({ startTime: "", endTime: "" });
-  const [bookForm, setBookForm] = useState({
-    instructorId: "",
-    startTime: "",
-    endTime: "",
-    notes: "",
-  });
+  const [bookForm,  setBookForm]  = useState({ instructorId: "", startTime: "", endTime: "", notes: "" });
 
   const isInstructor = user?.role === "INSTRUCTOR";
-  const isStudent = user?.role === "STUDENT";
-  const isAdmin = user?.role === "ADMIN";
+  const isStudent    = user?.role === "STUDENT";
 
-  // Calendar data — students see the selected instructor's calendar
-  const calendarInstructorId = isInstructor || isAdmin ? user?.id : (bookForm.instructorId || undefined);
+  // Calendar data:
+  // - Instructor: their own ID → shows their availability + all bookings they have
+  // - Student:    selected instructor's ID (for availability overlay while booking); undefined otherwise
+  // - Admin:      undefined → no instructor-specific calendar; events come from bookings list
+  const calendarInstructorId = isInstructor
+    ? user?.id
+    : isStudent
+    ? (bookForm.instructorId || undefined)
+    : undefined;
+
   const { data: calendar, isLoading: calLoading } = useQuery({
     queryKey: ["calendar", calendarInstructorId, weekStart.toISOString()],
-    queryFn: () =>
-      schedulingService.weeklyCalendar(
-        calendarInstructorId,
-        weekStart.toISOString()
-      ),
+    queryFn: () => schedulingService.weeklyCalendar(calendarInstructorId, weekStart.toISOString()),
   });
 
-  // Bookings list
   const { data: bookings, isLoading: bookingsLoading } = useQuery({
-    queryKey: ["bookings"],
+    queryKey: ["bookings", user?.id],
     queryFn: () => schedulingService.listBookings({ page: 1, limit: 20 }),
   });
 
@@ -87,11 +87,11 @@ export function SchedulingPage() {
   });
 
   const createBookMutation = useMutation({
-    mutationFn: (data: typeof bookForm) =>
-      schedulingService.createBooking(data),
+    mutationFn: (data: typeof bookForm) => schedulingService.createBooking(data),
     onSuccess: () => {
       toast({ title: "Booking requested successfully" });
-      queryClient.invalidateQueries({ queryKey: ["bookings"] });
+      queryClient.invalidateQueries({ queryKey: ["bookings", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["calendar"] });
       setShowBookForm(false);
     },
     onError: (err: unknown) => {
@@ -105,7 +105,7 @@ export function SchedulingPage() {
       schedulingService.updateBookingStatus(id, status),
     onSuccess: () => {
       toast({ title: "Booking updated" });
-      queryClient.invalidateQueries({ queryKey: ["bookings"] });
+      queryClient.invalidateQueries({ queryKey: ["bookings", user?.id] });
       queryClient.invalidateQueries({ queryKey: ["calendar"] });
     },
     onError: (err: unknown) => {
@@ -120,85 +120,110 @@ export function SchedulingPage() {
     const dayAvail = (calendar?.availabilities ?? []).filter((a: Availability) =>
       isSameDay(new Date(a.startTime), day)
     );
-    const dayBookings = (calendar?.bookings ?? []).filter((b: Booking) =>
-      isSameDay(new Date(b.startTime), day)
-    );
+    // Instructors: bookings come from the weekly calendar (instructor-scoped)
+    // Students & Admin: bookings come from the bookings list (already scoped to their own bookings)
+    const dayBookings = isInstructor
+      ? (calendar?.bookings ?? []).filter((b: Booking) => isSameDay(new Date(b.startTime), day))
+      : (bookings?.data ?? []).filter((b: Booking) => isSameDay(new Date(b.startTime), day));
     return { availabilities: dayAvail, bookings: dayBookings };
   };
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Calendar className="h-8 w-8 text-blue-700" />
-            Flight Scheduling
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            {isInstructor ? "Manage your availability and bookings" : "Book a session with an instructor"}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {isInstructor && (
-            <Button size="sm" variant="outline" onClick={() => setShowAvailForm(!showAvailForm)}>
-              <Plus className="h-4 w-4 mr-1" /> Add Availability
-            </Button>
-          )}
-          {isStudent && (
-            <Button size="sm" onClick={() => setShowBookForm(!showBookForm)}>
-              <Plus className="h-4 w-4 mr-1" /> Book Session
-            </Button>
-          )}
-        </div>
+    <div className="min-h-screen bg-grid relative">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-0 left-1/2 w-96 h-96 rounded-full bg-sky-500/4 blur-[100px]" />
       </div>
 
-      {/* Add Availability Form */}
-      {isInstructor && showAvailForm && (
-        <Card className="mb-6">
-          <CardHeader><CardTitle className="text-base">Add Availability Slot</CardTitle></CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+      <div className="relative container mx-auto px-4 py-10">
+
+        {/* ── Header ── */}
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-5 mb-10 animate-fade-up">
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-7 w-7 rounded-lg bg-sky-500/10 border border-sky-500/20
+                              flex items-center justify-center">
+                <Calendar className="h-3.5 w-3.5 text-sky-400" />
+              </div>
+              <span className="text-xs text-sky-400 font-bold tracking-widest uppercase">Skynet Module</span>
+            </div>
+            <h1 className="font-display text-4xl font-bold">Flight Scheduling</h1>
+            <p className="text-muted-foreground mt-1">
+              {isInstructor ? "Manage availability and incoming requests" : "Book a session with a certified instructor"}
+            </p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            {isInstructor && (
+              <button
+                onClick={() => setShowAvailForm(!showAvailForm)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold
+                           border border-sky-500/30 text-sky-400 bg-sky-500/10
+                           hover:bg-sky-500/20 transition-all"
+              >
+                {showAvailForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                {showAvailForm ? "Close" : "Add Availability"}
+              </button>
+            )}
+            {isStudent && (
+              <button
+                onClick={() => setShowBookForm(!showBookForm)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold
+                           bg-primary text-primary-foreground hover:bg-primary/90
+                           active:scale-[0.98] transition-all amber-glow-sm"
+              >
+                {showBookForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                {showBookForm ? "Close" : "Book Session"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ── Add Availability Form ── */}
+        {isInstructor && showAvailForm && (
+          <div className="rounded-xl border border-sky-500/20 bg-card mb-8 p-6 animate-fade-up">
+            <h3 className="font-display text-lg font-semibold mb-5 text-sky-400">
+              Add Availability Slot
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
               <div>
-                <Label>Start Time</Label>
-                <Input
-                  type="datetime-local"
+                <label className={labelCls}>Start Time</label>
+                <input type="datetime-local" className={inputCls}
                   value={availForm.startTime}
-                  onChange={(e) => setAvailForm((p) => ({ ...p, startTime: e.target.value }))}
-                />
+                  onChange={(e) => setAvailForm((p) => ({ ...p, startTime: e.target.value }))} />
               </div>
               <div>
-                <Label>End Time</Label>
-                <Input
-                  type="datetime-local"
+                <label className={labelCls}>End Time</label>
+                <input type="datetime-local" className={inputCls}
                   value={availForm.endTime}
-                  onChange={(e) => setAvailForm((p) => ({ ...p, endTime: e.target.value }))}
-                />
+                  onChange={(e) => setAvailForm((p) => ({ ...p, endTime: e.target.value }))} />
               </div>
-              <Button
+              <button
                 onClick={() => createAvailMutation.mutate({
                   startTime: new Date(availForm.startTime).toISOString(),
                   endTime: new Date(availForm.endTime).toISOString(),
                 })}
                 disabled={!availForm.startTime || !availForm.endTime || createAvailMutation.isPending}
+                className="h-10 px-5 rounded-lg bg-sky-500 text-white text-sm font-semibold
+                           hover:bg-sky-400 disabled:opacity-50 disabled:cursor-not-allowed
+                           flex items-center justify-center gap-2 transition-all"
               >
-                {createAvailMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+                {createAvailMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 Create Slot
-              </Button>
+              </button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
 
-      {/* Book Session Form */}
-      {isStudent && showBookForm && (
-        <Card className="mb-6">
-          <CardHeader><CardTitle className="text-base">Request a Booking</CardTitle></CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* ── Book Session Form ── */}
+        {isStudent && showBookForm && (
+          <div className="rounded-xl border border-amber-500/20 bg-card mb-8 p-6 animate-fade-up">
+            <h3 className="font-display text-lg font-semibold mb-5 text-amber-400">
+              Request a Booking
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label>Instructor</Label>
+                <label className={labelCls}>Instructor</label>
                 <select
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  className={inputCls}
                   value={bookForm.instructorId}
                   onChange={(e) => setBookForm((p) => ({ ...p, instructorId: e.target.value }))}
                 >
@@ -207,34 +232,35 @@ export function SchedulingPage() {
                     <option key={i.id} value={i.id}>{i.name}</option>
                   ))}
                 </select>
+                {instructorOptions.length === 0 && (
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    No instructors have posted availability yet.
+                  </p>
+                )}
               </div>
               <div>
-                <Label>Notes (optional)</Label>
-                <Input
-                  placeholder="e.g. Solo flight prep"
+                <label className={labelCls}>Notes (optional)</label>
+                <input className={inputCls} placeholder="e.g. Solo flight prep"
                   value={bookForm.notes}
-                  onChange={(e) => setBookForm((p) => ({ ...p, notes: e.target.value }))}
-                />
+                  onChange={(e) => setBookForm((p) => ({ ...p, notes: e.target.value }))} />
               </div>
               <div>
-                <Label>Start Time</Label>
-                <Input
-                  type="datetime-local"
+                <label className={labelCls}>Start Time</label>
+                <input type="datetime-local" className={inputCls}
                   value={bookForm.startTime}
-                  onChange={(e) => setBookForm((p) => ({ ...p, startTime: e.target.value }))}
-                />
+                  onChange={(e) => setBookForm((p) => ({ ...p, startTime: e.target.value }))} />
               </div>
               <div>
-                <Label>End Time</Label>
-                <Input
-                  type="datetime-local"
+                <label className={labelCls}>End Time</label>
+                <input type="datetime-local" className={inputCls}
                   value={bookForm.endTime}
-                  onChange={(e) => setBookForm((p) => ({ ...p, endTime: e.target.value }))}
-                />
+                  onChange={(e) => setBookForm((p) => ({ ...p, endTime: e.target.value }))} />
               </div>
             </div>
-            <Button
-              className="mt-4"
+            <button
+              className="mt-5 h-10 px-6 rounded-lg bg-primary text-primary-foreground text-sm font-semibold
+                         hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed
+                         flex items-center gap-2 transition-all amber-glow-sm"
               onClick={() => createBookMutation.mutate({
                 ...bookForm,
                 startTime: new Date(bookForm.startTime).toISOString(),
@@ -242,165 +268,198 @@ export function SchedulingPage() {
               })}
               disabled={!bookForm.instructorId || !bookForm.startTime || !bookForm.endTime || createBookMutation.isPending}
             >
-              {createBookMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+              {createBookMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Request Booking
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+            </button>
+          </div>
+        )}
 
-      {/* ── Weekly Calendar ── */}
-      <Card className="mb-8">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5" />
-              Week of {format(weekStart, "MMMM d, yyyy")}
-            </CardTitle>
-            <div className="flex gap-2">
-              <Button variant="outline" size="icon" onClick={() => setWeekStart((w) => subWeeks(w, 1))}>
+        {/* ── Weekly Calendar ── */}
+        <div className="rounded-xl border border-border bg-card mb-8 overflow-hidden animate-fade-up-1">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <span className="font-display font-semibold">
+                {format(weekStart, "MMMM d")} – {format(addDays(weekStart, 6), "d, yyyy")}
+              </span>
+            </div>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setWeekStart((w) => subWeeks(w, 1))}
+                className="h-8 w-8 rounded-lg border border-border flex items-center justify-center
+                           text-muted-foreground hover:text-foreground hover:border-white/20 transition-all"
+              >
                 <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="icon" onClick={() => setWeekStart((w) => addWeeks(w, 1))}>
+              </button>
+              <button
+                onClick={() => setWeekStart((w) => addWeeks(w, 1))}
+                className="h-8 w-8 rounded-lg border border-border flex items-center justify-center
+                           text-muted-foreground hover:text-foreground hover:border-white/20 transition-all"
+              >
                 <ChevronRight className="h-4 w-4" />
-              </Button>
+              </button>
             </div>
           </div>
-        </CardHeader>
-        <CardContent>
+
           {calLoading ? (
-            <div className="h-40 flex items-center justify-center text-muted-foreground">Loading calendar...</div>
+            <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Loading calendar…
+            </div>
           ) : (
-            <div className="grid grid-cols-7 gap-1 text-xs">
+            <div className="p-3">
               {/* Day headers */}
-              {days.map((day, i) => (
-                <div key={i} className="text-center font-semibold text-muted-foreground py-2">
-                  <div>{DAYS[i]}</div>
-                  <div className={`text-base ${isSameDay(day, new Date()) ? "text-blue-700 font-bold" : "text-foreground"}`}>
-                    {format(day, "d")}
+              <div className="grid grid-cols-7 gap-1 mb-1">
+                {days.map((day, i) => (
+                  <div key={i} className="text-center py-2">
+                    <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">
+                      {DAYS[i]}
+                    </p>
+                    <p className={`font-display text-lg font-bold mt-0.5
+                                   ${isSameDay(day, new Date())
+                                     ? "text-amber-400"
+                                     : "text-foreground"}`}>
+                      {format(day, "d")}
+                    </p>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
               {/* Day cells */}
-              {days.map((day, i) => {
-                const { availabilities: dayAvail, bookings: dayBookings } = getEventsForDay(day);
-                return (
-                  <div
-                    key={i}
-                    className={`min-h-[100px] p-1 rounded border text-xs space-y-1 ${
-                      isSameDay(day, new Date()) ? "bg-blue-50 border-blue-200" : "border-border"
-                    }`}
-                  >
-                    {dayAvail.map((a: Availability) => (
-                      <div key={a.id} className="bg-green-100 border border-green-300 rounded p-1 text-green-800">
-                        <div className="font-medium">Available</div>
-                        <div>{format(new Date(a.startTime), "HH:mm")}–{format(new Date(a.endTime), "HH:mm")}</div>
-                      </div>
-                    ))}
-                    {dayBookings.map((b: Booking) => (
-                      <div key={b.id} className={`rounded p-1 border ${STATUS_CONFIG[b.status].color}`}>
-                        <div className="font-medium">{b.student.name}</div>
-                        <div>{format(new Date(b.startTime), "HH:mm")}–{format(new Date(b.endTime), "HH:mm")}</div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
+              <div className="grid grid-cols-7 gap-1">
+                {days.map((day, i) => {
+                  const { availabilities: dayAvail, bookings: dayBookings } = getEventsForDay(day);
+                  return (
+                    <div
+                      key={i}
+                      className={`min-h-[90px] p-1 rounded-lg border text-xs space-y-1
+                                  ${isSameDay(day, new Date())
+                                    ? "border-amber-500/20 bg-amber-500/5"
+                                    : "border-border"}`}
+                    >
+                      {dayAvail.map((a: Availability) => (
+                        <div key={a.id}
+                             className="rounded-md p-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                          <div className="font-semibold text-[10px] uppercase tracking-wider">Open</div>
+                          <div className="font-mono text-[10px]">
+                            {format(new Date(a.startTime), "HH:mm")}–{format(new Date(a.endTime), "HH:mm")}
+                          </div>
+                        </div>
+                      ))}
+                      {dayBookings.map((b: Booking) => (
+                        <div key={b.id}
+                             className={`rounded-md p-1.5 border ${STATUS_CONFIG[b.status].style}`}>
+                          <div className="font-semibold truncate text-[10px]">
+                            {isInstructor ? b.student.name : b.instructor.name}
+                          </div>
+                          <div className="font-mono text-[10px]">
+                            {format(new Date(b.startTime), "HH:mm")}–{format(new Date(b.endTime), "HH:mm")}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* Bookings List */}
-      <div>
-        <h2 className="text-xl font-semibold mb-4">
-          {isInstructor ? "Incoming Booking Requests" : "My Bookings"}
-        </h2>
-        {bookingsLoading ? (
-          <div className="animate-pulse space-y-2">
-            {[1, 2, 3].map((i) => <div key={i} className="h-16 bg-muted rounded" />)}
-          </div>
-        ) : bookings?.data.length === 0 ? (
-          <Card>
-            <CardContent className="py-8 text-center text-muted-foreground">No bookings found.</CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-3">
-            {bookings?.data.map((booking) => (
-              <Card key={booking.id}>
-                <CardContent className="py-4">
+        {/* ── Bookings List ── */}
+        <div className="animate-fade-up-2">
+          <h2 className="font-display text-2xl font-semibold mb-5">
+            {isInstructor ? "Incoming Requests" : "My Bookings"}
+          </h2>
+
+          {bookingsLoading ? (
+            <div className="space-y-3">
+              {[1,2,3].map((i) => (
+                <div key={i} className="h-20 rounded-xl bg-muted animate-pulse" />
+              ))}
+            </div>
+          ) : bookings?.data.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card py-12 text-center text-muted-foreground">
+              No bookings found.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {bookings?.data.map((booking) => (
+                <div key={booking.id}
+                     className="rounded-xl border border-border bg-card px-5 py-4 transition-all
+                                hover:border-white/15">
                   <div className="flex items-center justify-between flex-wrap gap-3">
-                    <div>
-                      <div className="font-medium">
-                        {isStudent ? booking.instructor.name : booking.student.name}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2.5 mb-1">
+                        <p className="font-semibold truncate">
+                          {isStudent ? booking.instructor.name : booking.student.name}
+                        </p>
+                        <span className={`shrink-0 border rounded px-2 py-0.5 text-[10px] font-bold
+                                          tracking-wider uppercase ${STATUS_CONFIG[booking.status].style}`}>
+                          {STATUS_CONFIG[booking.status].label}
+                        </span>
                       </div>
-                      <div className="text-sm text-muted-foreground">
-                        {format(new Date(booking.startTime), "MMM d, yyyy HH:mm")} –{" "}
+                      <p className="text-sm text-muted-foreground font-mono">
+                        {format(new Date(booking.startTime), "MMM d, yyyy · HH:mm")} –{" "}
                         {format(new Date(booking.endTime), "HH:mm")}
-                      </div>
+                      </p>
                       {booking.notes && (
-                        <div className="text-xs text-muted-foreground mt-1">"{booking.notes}"</div>
+                        <p className="text-xs text-muted-foreground/70 mt-1 italic">
+                          "{booking.notes}"
+                        </p>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-1 rounded-full text-xs border ${STATUS_CONFIG[booking.status].color}`}>
-                        {STATUS_CONFIG[booking.status].label}
-                      </span>
-
-                      {/* Instructor actions */}
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 shrink-0">
                       {isInstructor && booking.status === "REQUESTED" && (
                         <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border-green-500 text-green-700 hover:bg-green-50"
+                          <button
                             onClick={() => statusMutation.mutate({ id: booking.id, status: "APPROVED" })}
                             disabled={statusMutation.isPending}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+                                       border border-emerald-500/30 text-emerald-400 bg-emerald-500/10
+                                       hover:bg-emerald-500/20 disabled:opacity-50 transition-all"
                           >
-                            <CheckCircle className="h-4 w-4 mr-1" /> Approve
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border-red-500 text-red-700 hover:bg-red-50"
+                            <CheckCircle className="h-3.5 w-3.5" /> Approve
+                          </button>
+                          <button
                             onClick={() => statusMutation.mutate({ id: booking.id, status: "CANCELLED" })}
                             disabled={statusMutation.isPending}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+                                       border border-red-500/30 text-red-400 bg-red-500/10
+                                       hover:bg-red-500/20 disabled:opacity-50 transition-all"
                           >
-                            <XCircle className="h-4 w-4 mr-1" /> Decline
-                          </Button>
+                            <XCircle className="h-3.5 w-3.5" /> Decline
+                          </button>
                         </>
                       )}
                       {isInstructor && booking.status === "APPROVED" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
+                        <button
                           onClick={() => statusMutation.mutate({ id: booking.id, status: "COMPLETED" })}
                           disabled={statusMutation.isPending}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold
+                                     border border-sky-500/30 text-sky-400 bg-sky-500/10
+                                     hover:bg-sky-500/20 disabled:opacity-50 transition-all"
                         >
                           Mark Completed
-                        </Button>
+                        </button>
                       )}
-
-                      {/* Student cancel */}
                       {isStudent && ["REQUESTED", "APPROVED"].includes(booking.status) && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="border-red-500 text-red-700 hover:bg-red-50"
+                        <button
                           onClick={() => statusMutation.mutate({ id: booking.id, status: "CANCELLED" })}
                           disabled={statusMutation.isPending}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+                                     border border-red-500/30 text-red-400 bg-red-500/10
+                                     hover:bg-red-500/20 disabled:opacity-50 transition-all"
                         >
-                          <XCircle className="h-4 w-4 mr-1" /> Cancel
-                        </Button>
+                          <XCircle className="h-3.5 w-3.5" /> Cancel
+                        </button>
                       )}
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

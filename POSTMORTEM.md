@@ -58,16 +58,19 @@ jwt.sign(payload, secret, {
 
 ---
 
-## Challenge 4: Prisma JSON Field for Question Options
+## Challenge 4: Prisma JSON Field Double-Encoding Bug
 
 ### What happened
-The `Question.options` field is stored as `Json` in Prisma (which maps to `jsonb` in PostgreSQL). When reading it back, TypeScript types it as `Prisma.JsonValue` rather than `string[]`, causing frontend type errors when trying to `.map()` over it.
+The `Question.options` field is a Prisma `Json` type (PostgreSQL `jsonb`). Both `seed.ts` and `createLesson` were wrapping the options array with `JSON.stringify()` before passing it to Prisma. Because Prisma's `Json` type serializes its input automatically, this caused double-encoding: the database stored the JSON string `"[\"A\",\"B\",\"C\",\"D\"]"` (a string value) instead of the JSON array `["A","B","C","D"]`. When Prisma deserialized it, `question.options` came back as a JavaScript string. Calling `.map()` on a string throws `TypeError: .map is not a function` at runtime, crashing the React tree and blanking the entire page (no error boundary to catch it).
 
 ### How it was resolved
-Used explicit casting on the frontend (`question.options as string[]`) and ensured the seed and create logic always passes a serialized JSON array. On the backend, returned options are always arrays because of how Prisma deserializes jsonb.
+Removed `JSON.stringify()` from both `createLesson` in `course.service.ts` and from `seed.ts` — Prisma's `Json` type accepts JavaScript arrays directly. Added backward-compatible parsing in `getLessonById` to handle any already-stored double-encoded records:
+```typescript
+options: typeof q.options === "string" ? JSON.parse(q.options) : q.options
+```
 
 ### Lesson learned
-**Prisma's `Json` type requires careful handling at type boundaries.** For strongly typed arrays, consider storing as a typed Prisma model (`QuestionOption`) rather than `Json`, at the cost of an extra table join. For this scope, the cast was the right trade-off.
+**Never call `JSON.stringify` before passing a value to a Prisma `Json` field.** Prisma handles serialization. Also: always mount a top-level React `ErrorBoundary` — a single component crash should not blank the entire application.
 
 ---
 
@@ -107,15 +110,21 @@ After an instructor approved or cancelled a booking, the booking list didn't ref
 The `onSuccess` callback only invalidated `["bookings"]` but not `["calendar"]`. Two separate query keys needed invalidation.
 
 ### How it was resolved
+Added `calendar` invalidation alongside `bookings`. Also scoped the `bookings` query key to include the user's ID so different users get isolated cache slots and never see each other's data on login without a page refresh. Added `queryClient.clear()` on logout to wipe all cached data.
 ```typescript
-onSuccess: () => {
-  queryClient.invalidateQueries({ queryKey: ["bookings"] });
-  queryClient.invalidateQueries({ queryKey: ["calendar"] });
-}
+// Query key includes userId to prevent cross-user cache leakage
+queryKey: ["bookings", user?.id]
+
+// On mutation success, invalidate both affected views
+queryClient.invalidateQueries({ queryKey: ["bookings", user?.id] });
+queryClient.invalidateQueries({ queryKey: ["calendar"] });
+
+// On logout, clear entire cache
+queryClient.clear();
 ```
 
 ### Lesson learned
-**Track all derived state carefully.** When a mutation affects multiple views, enumerate all affected query keys. A UI that shows the same data in two places (list + calendar) needs both invalidated.
+**Track all derived state carefully.** When a mutation affects multiple views, enumerate all affected query keys. A UI that shows the same data in two places (list + calendar) needs both invalidated. For user-scoped queries, always include the user ID in the cache key to prevent stale data leaking between sessions.
 
 ---
 

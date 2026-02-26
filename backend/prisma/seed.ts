@@ -79,14 +79,14 @@ async function main() {
                     create: [
                       {
                         text: "What force directly opposes gravity on an aircraft?",
-                        options: JSON.stringify(["Drag", "Thrust", "Lift", "Weight"]),
+                        options: ["Drag", "Thrust", "Lift", "Weight"],
                         correctIndex: 2,
                         explanation: "Lift counteracts the weight of the aircraft.",
                         order: 1,
                       },
                       {
                         text: "Which control surface controls pitch?",
-                        options: JSON.stringify(["Ailerons", "Rudder", "Elevator", "Flaps"]),
+                        options: ["Ailerons", "Rudder", "Elevator", "Flaps"],
                         correctIndex: 2,
                         explanation: "The elevator controls pitch (nose up/down).",
                         order: 2,
